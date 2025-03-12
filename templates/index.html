@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Chat</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        #messages { list-style: none; padding: 0; }
+        li { margin: 5px 0; padding: 5px; border: 1px solid #ddd; }
+        .system-message { color: #555; }
+        .chat-history { border-top: 2px dashed #ccc; margin-top: 10px; padding-top: 10px; }
+        .active-users { border-top: 2px solid #aaa; margin-top: 10px; padding-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Chat</h1>
+    <ul id='messages'></ul>
+
+    <form onsubmit="sendMessage(event)">
+        <input type="text" id="recipientId" placeholder="Recipient ID" autocomplete="off" />
+        <input type="text" id="messageText" placeholder="Message" autocomplete="off" />
+        <button>Send</button>
+    </form>
+
+    <button onclick="getActiveUsers()">Show Active Users</button>
+    <button onclick="getMessageHistory()">Load Chat History</button>
+
+    <script>
+        let ws;
+        let userId;
+
+        function connectWebSocket() {
+            userId = parseInt(prompt("Enter your user ID:"), 10);
+            if (!userId || isNaN(userId)) {
+                alert("Invalid user ID. Please refresh and enter a valid ID.");
+                return;
+            }
+            ws = new WebSocket(`ws://localhost:8000/v1/websocket/communicate/${userId}`);
+
+            ws.onopen = function () {
+                console.log(`Connected as User ${userId}`);
+            };
+
+            ws.onmessage = function (event) {
+                const data = JSON.parse(event.data);
+                console.log('Raw message from server:', data);
+
+                if (data.action === "message") {
+                    const sender = data.fromUser === userId ? "You" : data.fromUser || "Unknown";
+                    displayMessage(`${sender} says: ${data.message}`);
+                } else if (data.action === "active_users") {
+                    displayActiveUsers(data.users);
+                } else if (data.action === "message_history") {
+                    displayChatHistory(data.messages);
+                } else if (data.message) {
+                    displayMessage(`Status: ${data.message}, Delivered: ${data.isDelivered}`);
+                }
+            };
+
+            ws.onerror = function (error) {
+                console.error("WebSocket error:", error);
+            };
+
+            ws.onclose = function (event) {
+                console.log(`WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
+            };
+        }
+
+        function sendMessage(event) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('WebSocket is not connected. Please refresh and try again.');
+                return;
+            }
+            const recipientId = document.getElementById("recipientId").value.trim();
+            const messageText = document.getElementById("messageText").value.trim();
+
+            if (!recipientId || !messageText) {
+                alert("Please enter both a recipient ID and a message.");
+                return;
+            }
+
+            const messageData = {
+                action: "message",
+                recipient_id: parseInt(recipientId, 10),
+                message: messageText
+            };
+
+            ws.send(JSON.stringify(messageData));
+            event.preventDefault();
+        }
+
+        function getActiveUsers() {
+            ws.send(JSON.stringify({ action: "get_active_users" }));
+        }
+
+        function getMessageHistory() {
+            const otherUserId = parseInt(prompt("Enter user ID to load chat history with:"), 10);
+            if (!otherUserId || isNaN(otherUserId) || otherUserId === userId) {
+                alert("Please enter a valid user ID different from your own.");
+                return;
+            }
+            ws.send(JSON.stringify({ action: "get_message_history", otherUserId }));
+        }
+
+        function displayMessage(content) {
+            const message = document.createElement('li');
+            message.textContent = content;
+            document.getElementById('messages').appendChild(message);
+        }
+
+        function displayActiveUsers(users) {
+            const message = document.createElement('li');
+            message.className = 'active-users';
+            message.textContent = `Active users: ${users.map(u => `${u.username} (${u.profile_name}) - Active: ${u.isActive}, Last active: ${u.activeOn}, Connections: ${u.connectedList.length}${u.newMessages > 0 ? `, New messages: ${u.newMessages}` : ""}`).join(" | ")}`;
+            document.getElementById('messages').appendChild(message);
+        }
+
+        function displayChatHistory(messages) {
+            const history = document.createElement('li');
+            history.className = 'chat-history';
+            history.textContent = `Chat history:\n${messages.map(m => `${m.fromUser === userId ? "You" : m.fromUser}: ${m.message} at ${m.sentOn}`).join("\n")}`;
+            document.getElementById('messages').appendChild(history);
+        }
+
+        window.onload = connectWebSocket;
+    </script>
+</body>
+</html>
